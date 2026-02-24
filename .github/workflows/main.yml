@@ -1,0 +1,61 @@
+name: Build NetHunter Kernel for Realme 8 5G (build auto fork)
+
+on:
+  workflow_dispatch:
+
+env:
+  KERNEL_SOURCE: "https://github.com/techyminati/android_kernel_realme_mt6833"
+  KERNEL_BRANCH: "android-13.0"
+  KERNEL_DEFCONFIG: "rm6833_defconfig"
+  CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784d.tar.gz"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libncurses5-dev bison flex python3 libssl-dev
+
+      - name: Download Clang Compiler
+        run: |
+          mkdir clang
+          wget -q ${{ env.CLANG_URL }} -O clang.tar.gz
+          tar -C clang -xzf clang.tar.gz
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_BRANCH }} kernel
+          
+      - name: Configure NetHunter Features
+        run: |
+          cd kernel
+          # Enabling HID, Monitor Mode, and Injection support in defconfig
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_USB_GADGET
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_USB_F_HID
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_USB_CONFIGFS_F_HID
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_MAC80211
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_CFG80211
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_RTW88
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_RTL8188EUS
+          scripts/config --file arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} -e CONFIG_ANDROID_BINDERFS
+
+      - name: Compile Kernel
+        run: |
+          cd kernel
+          export PATH=$(pwd)/../clang/bin:$PATH
+          make O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- ${{ env.KERNEL_DEFCONFIG }}
+          make -j$(nproc) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+      - name: Upload Compiled Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetHunter-Kernel-Realme8-5G
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/dtbo.img
