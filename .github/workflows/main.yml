@@ -11,38 +11,46 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install Build Essentials
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi libssl-dev libncurses5-dev bison flex python3 zip curl
 
-      - name: Download Proton Clang
+      - name: Download Toolchain (Direct GitHub Mirror)
         run: |
           mkdir -p clang
-          # Using a highly stable clang mirror to avoid Exit Code 8
-          curl -LSs https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz | tar -xzC clang --strip-components=1
+          # Using curl from a stable GitHub mirror to avoid Exit Code 8
+          curl -fLSs --retry 5 https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz | tar -xzC clang --strip-components=1
+          echo "Toolchain setup complete"
 
       - name: Clone Kernel Source
         run: |
           git clone --depth=1 https://github.com/techyminati/android_kernel_realme_mt6833 -b android-13.0 kernel
           
-      - name: Setup NetHunter Configs
+      - name: Configure NetHunter Features
         run: |
           cd kernel
-          # Directly enabling HID, Monitor mode and other NetHunter features
+          # Proving the script by modifying defconfig
+          [ -f arch/arm64/configs/rm6833_defconfig ] || { echo "Defconfig missing!"; exit 1; }
           scripts/config --file arch/arm64/configs/rm6833_defconfig -e CONFIG_USB_GADGET -e CONFIG_USB_F_HID -e CONFIG_USB_CONFIGFS_F_HID -e CONFIG_MAC80211 -e CONFIG_CFG80211 -e CONFIG_RTW88 -e CONFIG_RTL8188EUS -e CONFIG_ANDROID_BINDERFS
 
-      - name: Build Kernel
+      - name: Compile Kernel
         run: |
           cd kernel
           export PATH=$(pwd)/../clang/bin:$PATH
-          make O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- rm6833_defconfig
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          
+          make O=out CC=clang rm6833_defconfig
+          make -j$(nproc --all) O=out CC=clang 2>&1 | tee build.log
 
-      - name: Upload Finished Kernel
+      - name: Upload Kernel and Log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: NetHunter-Kernel-Realme8-5G
           path: |
             kernel/out/arch/arm64/boot/Image.gz-dtb
             kernel/out/arch/arm64/boot/dtbo.img
+            kernel/build.log
